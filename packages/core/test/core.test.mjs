@@ -1,0 +1,8 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {cardsToAnkiFile,parseBrowserCapture,EncounterStore,cueAt,parseSubtitles} from "../dist/index.js";
+const source={kind:"video",title:"Scene",locator:"/tmp/scene.mp4",language:"es",durationMs:12000};
+test("parses SRT and resolves cue",()=>{const cues=parseSubtitles("1\n00:00:01,000 --> 00:00:03,000\nHola mundo\n\n2\n00:00:03.100 --> 00:00:05.000\nHasta luego");assert.equal(cues.length,2);assert.equal(cueAt(cues,2000)?.text,"Hola mundo")});
+test("encounter history survives card deletion",()=>{const store=new EncounterStore();const cue={index:0,startMs:1000,endMs:3000,text:"No sabía que estabas aquí"};const one=store.capture({source,cue,selectedText:"sabía",definition:"I knew"});store.capture({source,cue:{...cue,index:1,startMs:5000,endMs:7000,text:"Ya lo sabía"},selectedText:"sabía"});store.markExported(one.id,"anki-42");store.markCardDeleted(one.id);assert.equal(store.encountersForTerm("SABÍA").length,2);assert.equal(store.listTerms()[0].encounterCount,2);store.close()});
+test("Anki export contains deep link",()=>{const store=new EncounterStore();const e=store.capture({source,cue:{index:0,startMs:4000,endMs:6000,text:"Estoy buscando trabajo"},selectedText:"buscando",definition:"looking for"});const output=cardsToAnkiFile([store.card(e.id)]);assert.match(output,/contextdeck:\/\/source\//);assert.match(output,/t=4000/);store.close()});
+test("validates browser capture",()=>{const item=parseBrowserCapture({version:1,source:{kind:"web",title:"Article",locator:"https://example.com/es",language:"es"},selectedText:"prueba",sentence:"Esto es una prueba.",capturedAt:new Date().toISOString()});assert.equal(item.selectedText,"prueba")});

@@ -1,0 +1,1 @@
+{"manifest_version":3,"name":"Context Deck Capture","version":"0.1.0","description":"Capture a selected sentence from a permitted webpage into Context Deck.","permissions":["activeTab","contextMenus","storage","downloads"],"background":{"service_worker":"background.js","type":"module"},"action":{"default_title":"Capture selection"}}

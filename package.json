@@ -1,0 +1,15 @@
+{
+  "name": "context-deck",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "build": "npm run build -w @context-deck/core && rm -rf dist && mkdir -p dist/desktop dist/extension && cp apps/desktop/index.html apps/desktop/style.css apps/desktop/app.js dist/desktop/ && cp apps/extension/manifest.json apps/extension/background.js dist/extension/",
+    "test": "npm run build -w @context-deck/core && node --test packages/core/test/*.test.mjs",
+    "demo": "npm run build -w @context-deck/core && node packages/core/dist/demo.js",
+    "check": "npm run build && npm test"
+  },
+  "engines": {"node": ">=20"},
+  "license": "MIT"
+}
