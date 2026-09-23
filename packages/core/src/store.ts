@@ -133,9 +133,30 @@ export class EncounterStore {
   /** Newest-first encounter list joined with term and source, for the desktop UI. */
   recentEncounters(limit = 200): EncounterView[] {
     return this.db.prepare(`SELECT e.id,t.display term,COALESCE(t.definition,'') definition,t.state,e.sentence,
-      s.title sourceTitle,s.kind sourceKind,e.start_ms startMs,e.page_url pageUrl,e.created_at createdAt
+      s.title sourceTitle,s.kind sourceKind,s.id sourceId,e.start_ms startMs,e.end_ms endMs,e.page_url pageUrl,e.screenshot_path screenshotPath,e.audio_clip_path audioClipPath,e.created_at createdAt
       FROM encounters e JOIN terms t ON t.id=e.term_id JOIN sources s ON s.id=e.source_id
       ORDER BY e.created_at DESC, e.rowid DESC LIMIT ?`).all(limit) as EncounterView[];
+  }
+
+  /** Attach extracted frame/audio files to an encounter. Only fills paths; never removes history. */
+  attachMedia(encounterId: string, media: {screenshotPath?: string; audioClipPath?: string}): void {
+    this.db.prepare(`UPDATE encounters SET screenshot_path=COALESCE(?,screenshot_path), audio_clip_path=COALESCE(?,audio_clip_path) WHERE id=?`)
+      .run(media.screenshotPath ?? null, media.audioClipPath ?? null, encounterId);
+  }
+
+  /** Encounters never sent to Anki (or whose card was deleted there), oldest first. */
+  unexportedCards(): AnkiCard[] {
+    const ids = this.db.prepare(`SELECT e.id FROM encounters e LEFT JOIN cards c ON c.encounter_id=e.id
+      WHERE c.encounter_id IS NULL OR c.external_id IS NULL OR c.deleted_at IS NOT NULL ORDER BY e.created_at, e.rowid`).all() as {id: string}[];
+    return ids.map(({id}) => this.card(id));
+  }
+
+  source(id: string): Source | undefined {
+    return this.db.prepare(`SELECT id,kind,title,locator,language,duration_ms durationMs,created_at createdAt FROM sources WHERE id=?`).get(id) as Source | undefined;
+  }
+
+  hasSourceLocator(locator: string): boolean {
+    return Boolean(this.db.prepare("SELECT 1 FROM sources WHERE locator=?").get(locator));
   }
 
   /** Cards for every encounter, oldest first, for a full Anki export. */

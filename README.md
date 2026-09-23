@@ -9,10 +9,13 @@ Learn a language from scenes and pages you actually care about. Context Deck kee
 - `npm start` runs Context Deck on your own machine at `http://127.0.0.1:4173` (localhost only, nothing leaves your computer).
 - Open a local video/audio file, load SRT or VTT subtitles, and follow the active line.
 - Click any word in the subtitle to pick it (the video pauses). Shift-click another word to extend it to a phrase. Works for unspaced scripts like Japanese and Chinese too, using the browser's word segmenter. Add a definition and save: the word, sentence and timestamp are stored together.
+- **Open media** on macOS shows the normal file picker and, when there's a matching `movie.srt`, `movie.vtt` or `movie.es.srt` next to the video, loads the subtitles automatically.
+- If ffmpeg is installed (`brew install ffmpeg`), every save also cuts a still frame and a short audio clip of that line from your own file. They show in the list (click ▶ to hear the line) and travel with the card to Anki. Without ffmpeg, saving still works, just without media.
 - Saves go into a local SQLite database and survive restarts (macOS: `~/Library/Application Support/Context Deck/deck.db`; elsewhere `~/.context-deck/deck.db`; override with `CONTEXT_DECK_DB`).
-- **Export to Anki** downloads `context-deck-anki.txt` with every saved encounter and a `contextdeck://` link to the exact moment. Import it in Anki with File > Import.
+- **Send to Anki** adds every new card, with frame and audio, to a "Context Deck" deck through the [AnkiConnect](https://ankiweb.net/shared/info/2055492159) add-on (Anki must be open). Cards already sent are skipped.
+- **Export file** downloads `context-deck-anki.txt` (text fields plus the `contextdeck://` link) for File > Import in Anki if you don't use AnkiConnect. Frames and audio are not included in the file.
 - The Chrome extension saves highlighted text from a webpage to `~/Downloads/context-deck/`. **Import browser captures** pulls those files into the database. Importing twice never creates duplicates (override the folder with `CONTEXT_DECK_CAPTURES`).
-- Optional: push a card through AnkiConnect on localhost, or create SRT with a whisper.cpp you installed yourself (core library adapters).
+- Optional: create SRT with a whisper.cpp you installed yourself (core library adapter).
 
 Encounters are append-only: deleting or re-exporting a card never deletes the history of where you met a word. There are regression tests for this and for persistence, import de-duplication and cross-site request blocking.
 
@@ -31,7 +34,7 @@ The flashcard is a disposable view of that history, not the history itself.
 
 ## Run it
 
-Requires Node 20+ (`node -v`; on macOS `brew install node`).
+Requires Node 20+ (`node -v`; on macOS `brew install node`). Recommended: `brew install ffmpeg` for frames and audio clips, and the AnkiConnect add-on in Anki (code 2055492159).
 
 ```bash
 git clone https://github.com/DeepanshuPal/context-deck.git
@@ -97,7 +100,6 @@ Use media you own or are allowed to access. Context Deck does not bypass DRM, sc
 ## Roadmap
 
 - Electron packaging and `contextdeck://` protocol registration
-- Frame and short-audio extraction through local ffmpeg
 - Optional dictionary adapters
 - Deck sync reconciliation without ever deleting encounters
 

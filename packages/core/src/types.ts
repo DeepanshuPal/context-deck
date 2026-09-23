@@ -74,7 +74,11 @@ export interface EncounterView {
   sentence: string;
   sourceTitle: string;
   sourceKind: SourceKind;
+  sourceId: string;
   startMs: number;
+  endMs: number;
   pageUrl?: string;
+  screenshotPath?: string;
+  audioClipPath?: string;
   createdAt: string;
 }
