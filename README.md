@@ -1,10 +1,22 @@
 # Context Deck
 
-Learn a language from scenes and pages you actually care about. Context Deck keeps every word connected to the sentence, clip and timestamp where you met it.
+Learn a language from the YouTube videos, Netflix shows and files you actually watch. Context Deck keeps every word connected to the sentence, clip and timestamp where you met it.
 
 **Local-first. No account. No server. No hosted media catalog. No DRM interception.**
 
-## What works in v0.6
+## Watch on YouTube and Netflix (v0.7)
+
+1. Open the Context Deck app and add a dictionary (**Dictionaries** > your language > **Download to English**).
+2. Click **YouTube & Netflix** > **Show extension folder**. In Chrome, open `chrome://extensions`, turn on **Developer mode**, and drag the **Browser Extension** folder onto the page (or **Load unpacked** and pick it). This is a one-time step; the extension isn't in the Chrome Web Store.
+3. Play a YouTube or Netflix video and turn its subtitles on (on YouTube, press **C**).
+4. The subtitles become clickable. **Hover a word** and its definition appears right above it (the video pauses while you read). **Click** to keep it open, **Shift-click** another word to make a phrase, edit the definition if you like, then press **S** (or Save). **Esc** closes.
+5. The word lands in Context Deck with its sentence, the moment in the video and a link back to it. **Send to Anki** as usual; the card's link reopens the video at that line.
+
+On YouTube, saving also keeps a still frame and the line's audio: the line replays once while it's recorded from the video in your tab, then the video goes back to where you were (turn this off in the extension's menu). **Netflix is copy-protected**, so its cards are text only, with a link back to the moment. Context Deck never records copy-protected video, and the extension only reads the subtitle text the site already shows. If the app is closed, saved words wait in Chrome and move into the app the next time it's open, with the definition filled in.
+
+The extension talks only to the Context Deck app on your own computer (`127.0.0.1`), and the app accepts it by its fixed extension ID. Other websites and extensions can't use that connection.
+
+## Also in the app
 
 - `npm start` runs Context Deck on your own machine at `http://127.0.0.1:4173` (localhost only, nothing leaves your computer).
 - Open a local video/audio file, load SRT or VTT subtitles, and follow the active line.
@@ -66,15 +78,15 @@ Each push also builds `.dmg` and `.zip` files in GitHub Actions (the mac-app wor
 
 Other commands: `npm run check` (build + tests), `npm run demo` (engine demo in memory).
 
-Load the browser extension in Chrome:
+Load the browser extension in Chrome (the Mac app's **YouTube & Netflix** button gives you the folder; from the repo, use `apps/extension`):
 
 1. Open `chrome://extensions`.
 2. Turn on Developer mode.
-3. Load unpacked: pick the `apps/extension` folder.
-4. Highlight text on a normal webpage, right-click, **Save selection to Context Deck**.
-5. In the app, click **Import browser captures**.
+3. Load unpacked: pick the extension folder.
 
-The extension only saves the text you highlight plus the page title and URL. It does not download page media or inspect DRM streams.
+Besides clickable YouTube/Netflix subtitles, you can highlight text on any normal webpage, right-click, **Save selection to Context Deck**, then click **Import browser captures** in the app. That saves only the highlighted text plus the page title and URL.
+
+`npm run e2e` runs the whole browser flow in real Chrome against YouTube- and Netflix-shaped test pages (it downloads the Spanish dictionary once).
 
 ## Local transcription
 
@@ -88,7 +100,7 @@ TSV export is the default and requires no integration. Optional AnkiConnect supp
 contextdeck://source/abc123?t=1422000&encounter=...
 ```
 
-The Mac app handles these links (see below).
+The Mac app handles these links (see below). Cards saved from YouTube or Netflix link straight to the video at that moment instead.
 
 ## Repository shape
 
@@ -115,7 +127,7 @@ Context Deck's code is original. It does not copy those repositories or bundle A
 
 ## Safety and scope
 
-Use media you own or are allowed to access. Context Deck does not bypass DRM, scrape streaming catalogs, or fetch protected media. Dictionaries are optional and stay local after the one-time download; nothing is looked up online.
+Use media you own or are allowed to access. Context Deck does not bypass DRM, scrape streaming catalogs, or fetch protected media. On streaming sites it reads only the subtitle text on screen; frames and audio are captured only from video that isn't copy-protected, and only when you save a word. Dictionaries are optional and stay local after the one-time download; nothing is looked up online.
 
 ## Roadmap
 
