@@ -1,0 +1,51 @@
+name: mac-app
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 22, cache: npm, cache-dependency-path: "package-lock.json"}
+      - run: npm ci
+      - run: npm ci
+        working-directory: apps/mac
+      - run: npm run dist
+        working-directory: apps/mac
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - name: Check contextdeck:// is registered in the app bundle
+        working-directory: apps/mac/release
+        run: |
+          plist="mac-arm64/Context Deck.app/Contents/Info.plist"
+          plutil -p "$plist" | tee /tmp/plist.txt | grep -A6 CFBundleURLTypes
+          grep -q '"contextdeck"' /tmp/plist.txt
+      - name: Smoke-launch the packaged app
+        working-directory: apps/mac/release
+        run: |
+          export CONTEXT_DECK_DB="$RUNNER_TEMP/deck.db"
+          "mac-arm64/Context Deck.app/Contents/MacOS/Context Deck" --remote-debugging-port=9333 > "$RUNNER_TEMP/app.log" 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:9333/json/list > "$RUNNER_TEMP/pages.json" && grep -q '127.0.0.1' "$RUNNER_TEMP/pages.json" && break; sleep 1; done
+          cat "$RUNNER_TEMP/pages.json"
+          grep -q 'Context Deck' "$RUNNER_TEMP/pages.json"
+          test -f "$CONTEXT_DECK_DB"
+          pkill -f "Context Deck.app" || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: context-deck-mac
+          path: |
+            apps/mac/release/*.dmg
+            apps/mac/release/*.zip
+          if-no-files-found: error
+      - if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            apps/mac/release/*.dmg
+            apps/mac/release/*.zip

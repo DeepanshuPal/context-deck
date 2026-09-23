@@ -16,7 +16,9 @@ export const defaultDbPath = () => process.env.CONTEXT_DECK_DB ?? (platform() ==
   : join(homedir(), ".context-deck", "deck.db"));
 export const defaultCaptureDir = () => process.env.CONTEXT_DECK_CAPTURES ?? join(homedir(), "Downloads", "context-deck");
 
-export interface AppOptions {dbPath?: string; captureDir?: string; uiDir?: string; port?: number; mediaDir?: string; ankiConnect?: string}
+export interface AppOptions {dbPath?: string; captureDir?: string; uiDir?: string; port?: number; mediaDir?: string; ankiConnect?: string;
+  /** Host-provided native picker (the Mac app passes Electron's dialog). */
+  pickFile?: () => Promise<string | null>}
 export interface ImportResult {imported: number; skipped: number; errors: {file: string; error: string}[]}
 
 export function importCaptureFolder(store: EncounterStore, dir: string): ImportResult {
@@ -74,7 +76,7 @@ export function createApp(options: AppOptions = {}): {server: Server; store: Enc
       if (req.method !== "GET" && origin && !/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin)) return json(res, 403, {error: "Forbidden origin"});
 
       if (url.pathname === "/api/pick-media" && req.method === "POST") {
-        const path = await pickFileNatively("Choose a video or audio file for Context Deck");
+        const path = options.pickFile ? await options.pickFile() : await pickFileNatively("Choose a video or audio file for Context Deck");
         return path ? json(res, 200, openMedia(path)) : json(res, 200, {cancelled: true});
       }
       if (url.pathname === "/api/open-media" && req.method === "POST") return json(res, 200, openMedia(String(JSON.parse(await readBody(req)).path ?? "")));
@@ -139,7 +141,7 @@ export function createApp(options: AppOptions = {}): {server: Server; store: Enc
         const outcome = store.importBrowserCapture(parseBrowserCapture(JSON.parse(await readBody(req))));
         return json(res, 200, {created: outcome.created});
       }
-      if (url.pathname === "/api/info" && req.method === "GET") return json(res, 200, {dbPath, captureDir, mediaDir, ffmpeg: await hasFfmpeg(), canPick: canPickNatively()});
+      if (url.pathname === "/api/info" && req.method === "GET") return json(res, 200, {dbPath, captureDir, mediaDir, ffmpeg: await hasFfmpeg(), canPick: Boolean(options.pickFile) || canPickNatively()});
 
       if (req.method === "GET" && !url.pathname.startsWith("/api/")) {
         const file = resolve(uiDir, "." + (url.pathname === "/" ? "/index.html" : decodeURIComponent(url.pathname)));
@@ -154,14 +156,4 @@ export function createApp(options: AppOptions = {}): {server: Server; store: Enc
   });
   server.on("close", () => store.close());
   return {server, store, dbPath, captureDir, mediaDir};
-}
-
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const port = Number(process.env.PORT ?? 4173);
-  const {server, dbPath, captureDir} = createApp();
-  server.listen(port, "127.0.0.1", () => {
-    console.log(`Context Deck running at http://127.0.0.1:${port}`);
-    console.log(`Database: ${dbPath}`);
-    console.log(`Extension captures folder: ${captureDir}`);
-  });
 }

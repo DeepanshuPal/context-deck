@@ -1,6 +1,6 @@
 {
   "name": "context-deck",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -10,7 +10,7 @@
     "build": "npm run build -w @context-deck/core && npm run build -w @context-deck/app && rm -rf dist && mkdir -p dist/desktop dist/extension && cp apps/desktop/index.html apps/desktop/style.css apps/desktop/app.js apps/desktop/tokens.js dist/desktop/ && cp apps/extension/manifest.json apps/extension/background.js dist/extension/",
     "test": "npm run build && node --test packages/core/test/*.test.mjs packages/app/test/*.test.mjs apps/desktop/test/*.test.mjs",
     "demo": "npm run build -w @context-deck/core && node packages/core/dist/demo.js",
-    "start": "npm run build && node packages/app/dist/server.js",
+    "start": "npm run build && node packages/app/dist/cli.js",
     "check": "npm test"
   },
   "engines": {

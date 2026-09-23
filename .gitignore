@@ -5,3 +5,4 @@ output/
 *.db-shm
 *.db-wal
 .DS_Store
+apps/mac/release/

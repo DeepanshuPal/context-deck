@@ -45,6 +45,23 @@ npm start
 
 Then open http://127.0.0.1:4173. Stop it with Ctrl+C; your saves stay.
 
+### Mac app
+
+The Mac app is the same interface in its own window, and it registers `contextdeck://` so the "Open original context" link on an Anki card opens the app, loads the original file and jumps to that line. It uses the same database as `npm start`.
+
+Build it on your Mac (no signing account needed, and because you built it yourself, macOS won't quarantine it):
+
+```bash
+cd apps/mac
+npm install
+npm run dist
+open release/mac-arm64/Context\ Deck.app      # Intel Macs: release/mac/Context\ Deck.app
+```
+
+Drag it into Applications, then open it once so macOS learns about the `contextdeck://` links. `npm run dev` runs it without packaging.
+
+Each push also builds `.dmg` and `.zip` files in GitHub Actions (the mac-app workflow artifacts). Those are ad-hoc signed, not notarized, so a downloaded copy needs right-click > Open the first time. If macOS says the app is damaged, run `xattr -dr com.apple.quarantine "/Applications/Context Deck.app"`.
+
 Other commands: `npm run check` (build + tests), `npm run demo` (engine demo in memory).
 
 Load the browser extension in Chrome:
@@ -69,12 +86,13 @@ TSV export is the default and requires no integration. Optional AnkiConnect supp
 contextdeck://source/abc123?t=1422000&encounter=...
 ```
 
-Desktop protocol registration is the next packaging milestone.
+The Mac app handles these links (see below).
 
 ## Repository shape
 
 ```text
 apps/desktop      static HTML/JS interface
+apps/mac          Electron wrapper, contextdeck:// handler, macOS packaging
 packages/app      localhost server: serves the UI, SQLite API, Anki export, capture import
 apps/extension    Manifest V3 selection capture
 packages/core     encounter graph, subtitles, export, local adapters
@@ -99,7 +117,6 @@ Use media you own or are allowed to access. Context Deck does not bypass DRM, sc
 
 ## Roadmap
 
-- Electron packaging and `contextdeck://` protocol registration
 - Optional dictionary adapters
 - Deck sync reconciliation without ever deleting encounters
 

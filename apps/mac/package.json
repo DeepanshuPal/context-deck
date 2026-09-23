@@ -1,0 +1,75 @@
+{
+  "name": "context-deck-mac",
+  "productName": "Context Deck",
+  "version": "0.5.0",
+  "description": "Local-first language learning from the scenes and pages you care about.",
+  "author": "Deepanshu Pal",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.mjs",
+  "scripts": {
+    "bundle": "npm --prefix ../.. run build && node build.mjs",
+    "dev": "npm run bundle && electron .",
+    "dist": "npm run bundle && electron-builder --mac --publish never && npm --prefix ../.. rebuild better-sqlite3 --silent",
+    "dist:dir": "npm run bundle && electron-builder --dir --publish never && npm --prefix ../.. rebuild better-sqlite3 --silent",
+    "postinstall": "electron-builder install-app-deps && npm --prefix ../.. rebuild better-sqlite3 --silent"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.2.0"
+  },
+  "devDependencies": {
+    "electron": "^38.0.0",
+    "electron-builder": "^26.0.12",
+    "esbuild": "^0.25.10"
+  },
+  "build": {
+    "appId": "dev.deepanshupal.contextdeck",
+    "productName": "Context Deck",
+    "files": [
+      "dist/**",
+      "ui/**",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "**/*.node"
+    ],
+    "protocols": [
+      {
+        "name": "Context Deck link",
+        "schemes": [
+          "contextdeck"
+        ]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.education",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "identity": "-",
+      "hardenedRuntime": false
+    },
+    "linux": {
+      "target": [
+        "dir"
+      ]
+    },
+    "directories": {
+      "output": "release"
+    }
+  }
+}
