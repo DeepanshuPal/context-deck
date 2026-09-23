@@ -11,6 +11,7 @@
       player: () => document.querySelector("#movie_player"),
       lines: () => [...document.querySelectorAll(".ytp-caption-window-container .caption-visual-line")].map((l) => l.textContent).filter((t) => t.trim()),
       segments: () => [...document.querySelectorAll(".ytp-caption-window-container .ytp-caption-segment")].map((s) => s.textContent),
+      container: () => document.querySelector(".ytp-caption-window-container"),
       title: () => (document.querySelector("#title h1, h1.ytd-watch-metadata")?.textContent ?? document.title.replace(/ - YouTube$/, "")).trim(),
       hideNative: ".ytp-caption-window-container{opacity:0!important}",
       ccHint: "Turn on subtitles (press C) to click words"
@@ -20,6 +21,7 @@
       player: () => document.querySelector(".watch-video--player-view") ?? document.querySelector(".watch-video") ?? document.querySelector("video")?.parentElement,
       lines: () => [...document.querySelectorAll(".player-timedtext .player-timedtext-text-container")].map((c) => [...c.querySelectorAll("span")].filter((s) => !s.querySelector("span")).map((s) => s.textContent).join("")).filter((t) => t.trim()),
       segments: () => [],
+      container: () => document.querySelector(".player-timedtext"),
       title: () => (document.querySelector('[data-uia="video-title"]')?.innerText.replace(/\s*\n\s*/g, " · ") ?? document.title.replace(/ ?[-|] ?Netflix$/, "")).trim() || "Netflix",
       hideNative: ".player-timedtext{opacity:0!important}",
       ccHint: "Turn on subtitles to click words"
@@ -38,7 +40,10 @@
   const history = [];        // recent cues with known end times
   const readCaption = () => {
     const lines = site.lines();
-    const text = (lines.length ? lines.join("\n") : site.segments().join(" ")).replace(/[ \t\u00a0]+/g, " ").trim();
+    const segs = lines.length ? [] : site.segments();
+    // Last resort if a site renames its caption classes: whatever text its caption container holds.
+    const raw = lines.length ? lines.join("\n") : segs.length ? segs.join(" ") : (site.container?.()?.innerText ?? "");
+    const text = raw.replace(/[ \t\u00a0]+/g, " ").trim();
     return text;
   };
 

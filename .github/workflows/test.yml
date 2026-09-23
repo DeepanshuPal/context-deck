@@ -13,3 +13,21 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm run demo
+
+  extension-e2e:
+    # Real Chrome + the real extension on YouTube/Netflix-shaped pages, the real app server and the real Spanish dictionary.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 22, cache: npm}
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg
+      - uses: browser-actions/setup-chrome@v1
+        id: chrome
+        with: {chrome-version: stable}
+      - run: npm ci && npm i --no-save puppeteer-core@25
+      - run: npm run e2e
+        env: {CHROME_PATH: "${{ steps.chrome.outputs.chrome-path }}"}
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: {name: e2e-screenshots, path: /tmp/context-deck-e2e/shots, if-no-files-found: ignore}

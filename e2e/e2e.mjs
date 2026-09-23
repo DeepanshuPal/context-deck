@@ -4,10 +4,17 @@ import puppeteer from "puppeteer-core";
 import {spawn, execFileSync} from "node:child_process";
 import {createServer} from "node:http";
 import {existsSync, mkdirSync, rmSync} from "node:fs";
-import {createApp} from "/tmp/cd/packages/app/dist/server.js";
+import {dirname, join} from "node:path";
+import {fileURLToPath} from "node:url";
+import {createApp} from "../packages/app/dist/server.js";
+const HERE = dirname(fileURLToPath(import.meta.url));
+const REPO = join(HERE, "..");
+const WORK = process.env.E2E_WORK ?? "/tmp/context-deck-e2e";
+const DICT = process.env.E2E_DICT ?? join(WORK, "wty-es-en.zip");
+const CHROME = process.env.CHROME_PATH ?? "/usr/bin/google-chrome";
 
-const SHOTS = "/downloads/context-deck"; mkdirSync(SHOTS, {recursive: true});
-const ROOT = "/tmp/e2e7/run"; rmSync(ROOT, {recursive: true, force: true}); mkdirSync(ROOT, {recursive: true});
+const SHOTS = process.env.E2E_SHOTS ?? join(WORK, "shots"); mkdirSync(SHOTS, {recursive: true});
+const ROOT = join(WORK, "run"); rmSync(ROOT, {recursive: true, force: true}); mkdirSync(ROOT, {recursive: true});
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (step, x) => console.log(`STEP ${step}: ${typeof x === "string" ? x : JSON.stringify(x)}`);
 const check = (cond, msg) => { if (!cond) { console.log(`FAIL: ${msg}`); process.exitCode = 1; throw new Error(msg); } };
@@ -20,19 +27,25 @@ createServer((req, res) => { let b = ""; req.on("data", (c) => b += c); req.on("
   if (action === "notesInfo") result = params.notes.map((id) => notes.has(id) ? {noteId: id} : {});
   res.end(JSON.stringify({result, error: null})); }); }).listen(8866, "127.0.0.1");
 
-const fixture = spawn("node", ["fixture.mjs"], {cwd: "/tmp/e2e7", stdio: "inherit"}); children.push(fixture);
+// Test media and a self-signed cert for www.youtube.com / www.netflix.com (mapped to the local fixture server).
+mkdirSync(WORK, {recursive: true});
+if (!existsSync(join(WORK, "scene.mp4"))) execFileSync("ffmpeg", ["-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=640x360:rate=25", "-f", "lavfi", "-i", "sine=frequency=330:beep_factor=4", "-t", "12", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart", join(WORK, "scene.mp4")]);
+if (!existsSync(join(WORK, "cert.pem"))) execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", join(WORK, "key.pem"), "-out", join(WORK, "cert.pem"), "-days", "2", "-subj", "/CN=www.youtube.com", "-addext", "subjectAltName=DNS:www.youtube.com,DNS:www.netflix.com"], {stdio: "ignore"});
+if (!existsSync(DICT)) execFileSync("curl", ["-sSfL", "-o", DICT, "https://huggingface.co/datasets/daxida/wty-release/resolve/main/latest/dict/es/en/wty-es-en.zip"]);
+const fixture = spawn("node", [join(HERE, "fixture.mjs")], {cwd: WORK, stdio: "inherit"}); children.push(fixture);
+await sleep(700);
 const startApp = () => new Promise((ok) => { const a = createApp({dbPath: `${ROOT}/deck.db`, captureDir: `${ROOT}/caps`, ankiConnect: "http://127.0.0.1:8866"}); a.server.listen(47317, "127.0.0.1", () => ok(a)); });
 let app = await startApp();
 const A = "http://127.0.0.1:47317";
 // Real Spanish pack through the app's own upload endpoint.
-await fetch(`${A}/api/dictionaries/upload?name=wty-es-en.zip`, {method: "POST", body: await import("node:fs").then((f) => f.readFileSync("/tmp/wty-es-en.zip"))});
+await fetch(`${A}/api/dictionaries/upload?name=wty-es-en.zip`, {method: "POST", body: await import("node:fs").then((f) => f.readFileSync(DICT))});
 for (let i = 0; i < 120; i++) { const j = (await (await fetch(`${A}/api/dictionaries`)).json()).job; if (j.state === "done") break; if (j.state === "error") throw new Error(j.error); await sleep(500); }
 log(1, {dictionaries: (await (await fetch(`${A}/api/dictionaries`)).json()).installed.map((d) => `${d.title} ${d.entry_count ?? d.entryCount}`)});
 
-const browser = await puppeteer.launch({executablePath: "/usr/bin/google-chrome", headless: true, pipe: true, enableExtensions: true,
+const browser = await puppeteer.launch({executablePath: CHROME, headless: true, pipe: true, enableExtensions: true,
   args: ["--no-sandbox", "--autoplay-policy=no-user-gesture-required", "--ignore-certificate-errors",
     "--host-resolver-rules=MAP www.youtube.com 127.0.0.1:4443, MAP www.netflix.com 127.0.0.1:4443"]});
-const extId = await browser.installExtension("/tmp/cd/apps/extension");
+const extId = await browser.installExtension(join(REPO, "apps", "extension"));
 check(extId === "mbcfobjmnbiojojpdgiagioofoajmnhp", `fixed extension id (got ${extId})`);
 log(2, `extension installed with fixed id ${extId}`);
 
