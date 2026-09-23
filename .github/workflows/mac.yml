@@ -31,9 +31,17 @@ jobs:
         run: |
           export CONTEXT_DECK_DB="$RUNNER_TEMP/deck.db"
           "mac-arm64/Context Deck.app/Contents/MacOS/Context Deck" --remote-debugging-port=9333 > "$RUNNER_TEMP/app.log" 2>&1 &
-          for i in $(seq 1 30); do curl -sf http://127.0.0.1:9333/json/list > "$RUNNER_TEMP/pages.json" && grep -q '127.0.0.1' "$RUNNER_TEMP/pages.json" && break; sleep 1; done
+          # Wait until the window has loaded the local UI (title is set once index.html is parsed).
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:9333/json/list > "$RUNNER_TEMP/pages.json" || true
+            grep -q '"title": "Context Deck"' "$RUNNER_TEMP/pages.json" 2>/dev/null && break
+            sleep 1
+          done
           cat "$RUNNER_TEMP/pages.json"
-          grep -q 'Context Deck' "$RUNNER_TEMP/pages.json"
+          grep -q '"title": "Context Deck"' "$RUNNER_TEMP/pages.json"
+          app_url=$(grep -o '"url": "http://127.0.0.1:[0-9]*/"' "$RUNNER_TEMP/pages.json" | head -1 | cut -d'"' -f4)
+          curl -sf "${app_url}api/info" | tee "$RUNNER_TEMP/info.json"; echo
+          grep -q "$CONTEXT_DECK_DB" "$RUNNER_TEMP/info.json"
           test -f "$CONTEXT_DECK_DB"
           pkill -f "Context Deck.app" || true
       - uses: actions/upload-artifact@v4
