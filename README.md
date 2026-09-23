@@ -62,7 +62,7 @@ open release/mac-arm64/Context\ Deck.app      # Intel Macs: release/mac/Context\
 
 Drag it into Applications, then open it once so macOS learns about the `contextdeck://` links. `npm run dev` runs it without packaging.
 
-Each push also builds `.dmg` and `.zip` files in GitHub Actions (the mac-app workflow artifacts). Those are ad-hoc signed, not notarized, so a downloaded copy needs right-click > Open the first time. If macOS says the app is damaged, run `xattr -dr com.apple.quarantine "/Applications/Context Deck.app"`.
+Each push also builds `.dmg` and `.zip` files in GitHub Actions (the mac-app workflow artifacts). Those are ad-hoc signed, not notarized, so macOS blocks a downloaded copy the first time. On macOS 15 Sequoia and later, open it once, then go to System Settings > Privacy & Security and click **Open Anyway**. On macOS 14 and earlier, right-click the app and choose **Open**. If macOS says the app is damaged, run `xattr -dr com.apple.quarantine "/Applications/Context Deck.app"`.
 
 Other commands: `npm run check` (build + tests), `npm run demo` (engine demo in memory).
 
