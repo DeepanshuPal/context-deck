@@ -38,3 +38,13 @@ export async function pushToAnkiConnect(card: AnkiCard, deckName = "Context Deck
   if (typeof result !== "number") throw new Error("AnkiConnect rejected note");
   return result;
 }
+
+/** Which of these note ids still exist in Anki. AnkiConnect returns an empty object for notes that were deleted. */
+export async function ankiNotesThatExist(noteIds: number[], endpoint = "http://127.0.0.1:8765"): Promise<Set<number>> {
+  if (!noteIds.length) return new Set();
+  const response = await fetch(endpoint, {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({action: "notesInfo", version: 6, params: {notes: noteIds}})});
+  if (!response.ok) throw new Error(`AnkiConnect returned HTTP ${response.status}`);
+  const body = await response.json() as {result: ({noteId?: number} | null)[] | null; error: string | null};
+  if (body.error || !Array.isArray(body.result)) throw new Error(body.error ?? "AnkiConnect notesInfo failed");
+  return new Set(body.result.map((n) => n?.noteId).filter((id): id is number => typeof id === "number"));
+}

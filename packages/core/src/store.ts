@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import {createHash, randomUUID} from "node:crypto";
 import type {AnkiCard, CaptureInput, Encounter, EncounterView, LearningState, Source, TermSummary} from "./types.js";
 import type {BrowserCapture} from "./browser-capture.js";
+import {dictKey, type DictionaryIndex, type LookupResult, type LookupSense, type ParsedForm, type ParsedTerm} from "./dictionary.js";
 
 const now = () => new Date().toISOString();
 const normalize = (value: string) => value.trim().toLocaleLowerCase().normalize("NFKC");
@@ -14,6 +15,8 @@ export class EncounterStore {
     this.db = new Database(path);
     this.db.pragma("foreign_keys = ON");
     this.db.pragma("journal_mode = WAL");
+    // The Mac app and `npm start` may share one database file; wait for the other writer instead of failing.
+    this.db.pragma("busy_timeout = 5000");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS sources (
         id TEXT PRIMARY KEY, kind TEXT NOT NULL, title TEXT NOT NULL, locator TEXT NOT NULL,
@@ -37,6 +40,19 @@ export class EncounterStore {
       CREATE TABLE IF NOT EXISTS imports (
         import_key TEXT PRIMARY KEY, encounter_id TEXT NOT NULL REFERENCES encounters(id), imported_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS dictionaries (
+        id INTEGER PRIMARY KEY, title TEXT NOT NULL UNIQUE, source_lang TEXT, target_lang TEXT, revision TEXT,
+        attribution TEXT, url TEXT, entry_count INTEGER NOT NULL DEFAULT 0, imported_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS dict_entries (
+        dict_id INTEGER NOT NULL REFERENCES dictionaries(id) ON DELETE CASCADE, term_key TEXT NOT NULL, term TEXT NOT NULL,
+        pos TEXT, glosses TEXT NOT NULL, score INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE IF NOT EXISTS dict_forms (
+        dict_id INTEGER NOT NULL REFERENCES dictionaries(id) ON DELETE CASCADE, form_key TEXT NOT NULL, lemma TEXT NOT NULL, note TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_dict_entries_key ON dict_entries(term_key);
+      CREATE INDEX IF NOT EXISTS idx_dict_forms_key ON dict_forms(form_key);
       CREATE INDEX IF NOT EXISTS idx_encounters_term ON encounters(term_id, created_at);
       CREATE INDEX IF NOT EXISTS idx_encounters_source_time ON encounters(source_id, start_ms);
     `);
@@ -133,8 +149,9 @@ export class EncounterStore {
   /** Newest-first encounter list joined with term and source, for the desktop UI. */
   recentEncounters(limit = 200): EncounterView[] {
     return this.db.prepare(`SELECT e.id,t.display term,COALESCE(t.definition,'') definition,t.state,e.sentence,
-      s.title sourceTitle,s.kind sourceKind,s.id sourceId,e.start_ms startMs,e.end_ms endMs,e.page_url pageUrl,e.screenshot_path screenshotPath,e.audio_clip_path audioClipPath,e.created_at createdAt
-      FROM encounters e JOIN terms t ON t.id=e.term_id JOIN sources s ON s.id=e.source_id
+      s.title sourceTitle,s.kind sourceKind,s.id sourceId,e.start_ms startMs,e.end_ms endMs,e.page_url pageUrl,e.screenshot_path screenshotPath,e.audio_clip_path audioClipPath,e.created_at createdAt,
+      CASE WHEN c.encounter_id IS NULL THEN 'new' WHEN c.deleted_at IS NOT NULL THEN 'deleted' WHEN c.external_id IS NULL THEN 'exported' ELSE 'in-anki' END cardStatus
+      FROM encounters e JOIN terms t ON t.id=e.term_id JOIN sources s ON s.id=e.source_id LEFT JOIN cards c ON c.encounter_id=e.id
       ORDER BY e.created_at DESC, e.rowid DESC LIMIT ?`).all(limit) as EncounterView[];
   }
 
@@ -144,10 +161,16 @@ export class EncounterStore {
       .run(media.screenshotPath ?? null, media.audioClipPath ?? null, encounterId);
   }
 
-  /** Encounters never sent to Anki (or whose card was deleted there), oldest first. */
+  /** Notes this deck believes are live in Anki. */
+  liveAnkiNotes(): {encounterId: string; noteId: number}[] {
+    return (this.db.prepare(`SELECT encounter_id encounterId, external_id noteId FROM cards WHERE external_id IS NOT NULL AND deleted_at IS NULL`).all() as {encounterId: string; noteId: string}[])
+      .map((r) => ({encounterId: r.encounterId, noteId: Number(r.noteId)})).filter((r) => Number.isFinite(r.noteId));
+  }
+
+  /** Encounters never sent to Anki, oldest first. Cards deleted in Anki are not re-sent automatically. */
   unexportedCards(): AnkiCard[] {
     const ids = this.db.prepare(`SELECT e.id FROM encounters e LEFT JOIN cards c ON c.encounter_id=e.id
-      WHERE c.encounter_id IS NULL OR c.external_id IS NULL OR c.deleted_at IS NOT NULL ORDER BY e.created_at, e.rowid`).all() as {id: string}[];
+      WHERE c.encounter_id IS NULL OR (c.external_id IS NULL AND c.deleted_at IS NULL) ORDER BY e.created_at, e.rowid`).all() as {id: string}[];
     return ids.map(({id}) => this.card(id));
   }
 
@@ -157,6 +180,58 @@ export class EncounterStore {
 
   hasSourceLocator(locator: string): boolean {
     return Boolean(this.db.prepare("SELECT 1 FROM sources WHERE locator=?").get(locator));
+  }
+
+  /** Start (or replace) a dictionary import; returns its id. */
+  beginDictionary(index: DictionaryIndex): number {
+    const tx = this.db.transaction(() => {
+      this.db.prepare("DELETE FROM dict_entries WHERE dict_id IN (SELECT id FROM dictionaries WHERE title=?)").run(index.title);
+      this.db.prepare("DELETE FROM dict_forms WHERE dict_id IN (SELECT id FROM dictionaries WHERE title=?)").run(index.title);
+      this.db.prepare("DELETE FROM dictionaries WHERE title=?").run(index.title);
+      return Number(this.db.prepare(`INSERT INTO dictionaries(title,source_lang,target_lang,revision,attribution,url,imported_at) VALUES(?,?,?,?,?,?,?)`)
+        .run(index.title, index.sourceLanguage ?? null, index.targetLanguage ?? null, index.revision ?? null, index.attribution ?? null, index.url ?? null, now()).lastInsertRowid);
+    });
+    return tx();
+  }
+
+  addDictionaryRows(dictId: number, terms: ParsedTerm[], forms: ParsedForm[]): void {
+    const addTerm = this.db.prepare("INSERT INTO dict_entries(dict_id,term_key,term,pos,glosses,score) VALUES(?,?,?,?,?,?)");
+    const addForm = this.db.prepare("INSERT INTO dict_forms(dict_id,form_key,lemma,note) VALUES(?,?,?,?)");
+    this.db.transaction(() => {
+      for (const t of terms) addTerm.run(dictId, dictKey(t.term), t.term, t.pos, JSON.stringify(t.glosses), t.score);
+      for (const f of forms) addForm.run(dictId, dictKey(f.form), f.lemma, f.note);
+      this.db.prepare("UPDATE dictionaries SET entry_count=entry_count+? WHERE id=?").run(terms.length, dictId);
+    })();
+  }
+
+  listDictionaries(): {id: number; title: string; sourceLang: string | null; targetLang: string | null; revision: string | null; attribution: string | null; entryCount: number; importedAt: string}[] {
+    return this.db.prepare(`SELECT id,title,source_lang sourceLang,target_lang targetLang,revision,attribution,entry_count entryCount,imported_at importedAt FROM dictionaries ORDER BY title`).all() as never;
+  }
+
+  removeDictionary(id: number): void {
+    this.db.transaction(() => {
+      this.db.prepare("DELETE FROM dict_entries WHERE dict_id=?").run(id);
+      this.db.prepare("DELETE FROM dict_forms WHERE dict_id=?").run(id);
+      this.db.prepare("DELETE FROM dictionaries WHERE id=?").run(id);
+    })();
+  }
+
+  /** Look a word up in every installed dictionary, following inflections (sabía -> saber) when the form itself has no entry. */
+  lookup(query: string): LookupResult | null {
+    const key = dictKey(query.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ""));
+    if (!key) return null;
+    const entries = (k: string) => this.db.prepare(`SELECT e.pos,e.glosses,d.title FROM dict_entries e JOIN dictionaries d ON d.id=e.dict_id
+      WHERE e.term_key=? ORDER BY e.score DESC, e.rowid LIMIT 12`).all(k) as {pos: string; glosses: string; title: string}[];
+    const toSenses = (rows: {pos: string; glosses: string; title: string}[]): LookupSense[] => rows.map((r) => ({pos: r.pos, glosses: JSON.parse(r.glosses), dictionary: r.title}));
+    let senses = toSenses(entries(key)); let lemma = query.trim(); let via: string | undefined;
+    const form = this.db.prepare("SELECT lemma,note FROM dict_forms WHERE form_key=? LIMIT 1").get(key) as {lemma: string; note: string} | undefined;
+    if (form && (!senses.length || senses.every((s) => s.pos === "non-lemma"))) {
+      const lemmaSenses = toSenses(entries(dictKey(form.lemma)));
+      if (lemmaSenses.length) { senses = lemmaSenses; lemma = form.lemma; via = form.note; }
+    }
+    if (!senses.length) return null;
+    const first = [...new Set(senses.flatMap((s) => s.glosses))].slice(0, 2).join("; ");
+    return {query, lemma, via, senses, suggestion: lemma !== query.trim() ? `(${lemma}) ${first}` : first};
   }
 
   /** Cards for every encounter, oldest first, for a full Anki export. */

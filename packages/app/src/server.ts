@@ -3,9 +3,12 @@ import {existsSync, mkdirSync, readdirSync, readFileSync, statSync} from "node:f
 import {homedir, platform} from "node:os";
 import {dirname, extname, join, resolve, sep} from "node:path";
 import {fileURLToPath} from "node:url";
-import {EncounterStore, cardsToAnkiFile, parseBrowserCapture, pushToAnkiConnect} from "@context-deck/core";
+import {EncounterStore, ankiNotesThatExist, cardsToAnkiFile, parseBrowserCapture, pushToAnkiConnect} from "@context-deck/core";
 import {tmpdir} from "node:os";
 import {isAbsolute, basename} from "node:path";
+import {CATALOG, catalogUrl, runDictionaryJob, type DictionaryJob} from "./dictionaries.js";
+import {createWriteStream} from "node:fs";
+import {pipeline} from "node:stream/promises";
 import {canPickNatively, extractClip, findSiblingSubtitles, hasFfmpeg, isMediaFile, mediaKind, pickFileNatively, streamFile} from "./media.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -18,7 +21,8 @@ export const defaultCaptureDir = () => process.env.CONTEXT_DECK_CAPTURES ?? join
 
 export interface AppOptions {dbPath?: string; captureDir?: string; uiDir?: string; port?: number; mediaDir?: string; ankiConnect?: string;
   /** Host-provided native picker (the Mac app passes Electron's dialog). */
-  pickFile?: () => Promise<string | null>}
+  pickFile?: (kind: "media" | "dictionary") => Promise<string | null>;
+  fetcher?: typeof fetch}
 export interface ImportResult {imported: number; skipped: number; errors: {file: string; error: string}[]}
 
 export function importCaptureFolder(store: EncounterStore, dir: string): ImportResult {
@@ -57,6 +61,22 @@ export function createApp(options: AppOptions = {}): {server: Server; store: Enc
   mkdirSync(mediaDir, {recursive: true});
   const ankiConnect = options.ankiConnect ?? process.env.CONTEXT_DECK_ANKICONNECT ?? "http://127.0.0.1:8765";
   const opened = new Set<string>();
+  let dictJob: DictionaryJob = {state: "idle", label: "", bytes: 0, total: 0, entries: 0, files: 0};
+  const ankiDown = (message: string) => /fetch failed|ECONNREFUSED/i.test(message);
+  const ANKI_CLOSED = "Anki isn't reachable. Open Anki with the AnkiConnect add-on installed, then try again.";
+  /** Mark cards whose notes were deleted inside Anki. Encounters are never touched. */
+  const reconcile = async () => {
+    const live = store.liveAnkiNotes();
+    const existing = await ankiNotesThatExist(live.map((l) => l.noteId), ankiConnect);
+    let deleted = 0;
+    for (const l of live) if (!existing.has(l.noteId)) { store.markCardDeleted(l.encounterId); deleted++; }
+    return {checked: live.length, deletedInAnki: deleted, inAnki: live.length - deleted};
+  };
+  const startDictJob = (label: string, source: {url?: string; path?: string; removeAfter?: boolean}) => {
+    if (dictJob.state === "downloading" || dictJob.state === "importing") throw new Error("A dictionary is already being added. Wait for it to finish.");
+    dictJob = {state: "downloading", label, bytes: 0, total: 0, entries: 0, files: 0};
+    void runDictionaryJob(store, dictJob, source, options.fetcher);
+  };
   const allowedMedia = (path: string) => opened.has(path) || store.hasSourceLocator(path);
   const openMedia = (path: string) => {
     if (!isAbsolute(path) || !existsSync(path) || !statSync(path).isFile() || !isMediaFile(path)) throw new Error("Not a readable local audio/video file");
@@ -76,7 +96,7 @@ export function createApp(options: AppOptions = {}): {server: Server; store: Enc
       if (req.method !== "GET" && origin && !/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin)) return json(res, 403, {error: "Forbidden origin"});
 
       if (url.pathname === "/api/pick-media" && req.method === "POST") {
-        const path = options.pickFile ? await options.pickFile() : await pickFileNatively("Choose a video or audio file for Context Deck");
+        const path = options.pickFile ? await options.pickFile("media") : await pickFileNatively("Choose a video or audio file for Context Deck");
         return path ? json(res, 200, openMedia(path)) : json(res, 200, {cancelled: true});
       }
       if (url.pathname === "/api/open-media" && req.method === "POST") return json(res, 200, openMedia(String(JSON.parse(await readBody(req)).path ?? "")));
@@ -97,16 +117,51 @@ export function createApp(options: AppOptions = {}): {server: Server; store: Enc
         return json(res, 200, {...source, available, media: available ? openMedia(source.locator) : undefined});
       }
       if (url.pathname === "/api/send-to-anki" && req.method === "POST") {
+        let sync;
+        try { sync = await reconcile(); } catch (error) { const m = (error as Error).message; return json(res, ankiDown(m) ? 502 : 500, {error: ankiDown(m) ? ANKI_CLOSED : m}); }
         const sent: string[] = []; const failed: {term: string; error: string}[] = [];
         for (const card of store.unexportedCards()) {
           try { const noteId = await pushToAnkiConnect(card, "Context Deck", ankiConnect); store.markExported(card.encounterId, String(noteId)); sent.push(card.term); }
           catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            if (/fetch failed|ECONNREFUSED/i.test(message)) return json(res, 502, {error: "Anki isn't reachable. Open Anki with the AnkiConnect add-on installed, then try again.", sent: sent.length});
+            if (ankiDown(message)) return json(res, 502, {error: ANKI_CLOSED, sent: sent.length});
             failed.push({term: card.term, error: message.slice(0, 200)});
           }
         }
-        return json(res, 200, {sent: sent.length, failed});
+        return json(res, 200, {sent: sent.length, failed, sync});
+      }
+      if (url.pathname === "/api/sync-anki" && req.method === "POST") {
+        try { return json(res, 200, await reconcile()); } catch (error) { const m = (error as Error).message; return json(res, ankiDown(m) ? 502 : 500, {error: ankiDown(m) ? ANKI_CLOSED : m}); }
+      }
+      if (/^\/api\/encounters\/[^/]+\/resend$/.test(url.pathname) && req.method === "POST") {
+        const id = decodeURIComponent(url.pathname.split("/")[3]);
+        try { const noteId = await pushToAnkiConnect(store.card(id), "Context Deck", ankiConnect); store.markExported(id, String(noteId)); return json(res, 200, {noteId}); }
+        catch (error) { const m = (error as Error).message; return json(res, ankiDown(m) ? 502 : 400, {error: ankiDown(m) ? ANKI_CLOSED : m}); }
+      }
+      if (url.pathname === "/api/lookup" && req.method === "GET") return json(res, 200, store.lookup(url.searchParams.get("term") ?? ""));
+      if (url.pathname === "/api/dictionaries" && req.method === "GET") return json(res, 200, {installed: store.listDictionaries(), catalog: CATALOG, job: dictJob});
+      if (url.pathname === "/api/dictionaries/download" && req.method === "POST") {
+        const code = String(JSON.parse(await readBody(req)).code ?? "");
+        const entry = CATALOG.find((c) => c.code === code);
+        if (!entry) return json(res, 400, {error: "Unknown language"});
+        startDictJob(`${entry.name} → English`, {url: catalogUrl(code)});
+        return json(res, 202, dictJob);
+      }
+      if (url.pathname === "/api/dictionaries/import-file" && req.method === "POST") {
+        const path = options.pickFile ? await options.pickFile("dictionary") : await pickFileNatively("Choose a Yomitan dictionary .zip");
+        if (!path) return json(res, 200, {cancelled: true});
+        startDictJob(basename(path), {path});
+        return json(res, 202, dictJob);
+      }
+      if (url.pathname === "/api/dictionaries/upload" && req.method === "POST") {
+        const temp = join(tmpdir(), `context-deck-upload-${Date.now()}.zip`);
+        await pipeline(req, createWriteStream(temp));
+        startDictJob(url.searchParams.get("name") ?? "dictionary.zip", {path: temp, removeAfter: true});
+        return json(res, 202, dictJob);
+      }
+      if (url.pathname.startsWith("/api/dictionaries/") && req.method === "DELETE") {
+        store.removeDictionary(Number(url.pathname.split("/").pop()));
+        return json(res, 200, {ok: true});
       }
       if (url.pathname === "/api/encounters" && req.method === "GET") return json(res, 200, store.recentEncounters());
       if (url.pathname === "/api/encounters" && req.method === "POST") {

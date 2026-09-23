@@ -4,7 +4,7 @@ Learn a language from scenes and pages you actually care about. Context Deck kee
 
 **Local-first. No account. No server. No hosted media catalog. No DRM interception.**
 
-## What works in v0.2
+## What works in v0.6
 
 - `npm start` runs Context Deck on your own machine at `http://127.0.0.1:4173` (localhost only, nothing leaves your computer).
 - Open a local video/audio file, load SRT or VTT subtitles, and follow the active line.
@@ -12,12 +12,14 @@ Learn a language from scenes and pages you actually care about. Context Deck kee
 - **Open media** on macOS shows the normal file picker and, when there's a matching `movie.srt`, `movie.vtt` or `movie.es.srt` next to the video, loads the subtitles automatically.
 - If ffmpeg is installed (`brew install ffmpeg`), every save also cuts a still frame and a short audio clip of that line from your own file. They show in the list (click ▶ to hear the line) and travel with the card to Anki. Without ffmpeg, saving still works, just without media.
 - Saves go into a local SQLite database and survive restarts (macOS: `~/Library/Application Support/Context Deck/deck.db`; elsewhere `~/.context-deck/deck.db`; override with `CONTEXT_DECK_DB`).
-- **Send to Anki** adds every new card, with frame and audio, to a "Context Deck" deck through the [AnkiConnect](https://ankiweb.net/shared/info/2055492159) add-on (Anki must be open). Cards already sent are skipped.
+- **Send to Anki** adds every new card, with frame and audio, to a "Context Deck" deck through the [AnkiConnect](https://ankiweb.net/shared/info/2055492159) add-on (Anki must be open). Cards already in Anki are skipped.
+- **Dictionaries** (optional, offline): download a free Wiktionary pack for one of 17 languages into English, or import any Yomitan-format `.zip` you already have (for example JMdict). The pack is downloaded once and stored in your local database; after that, lookups run fully offline. Clicking a subtitle word looks it up, follows inflections to the base form (`sabía` → `saber`) and fills in the definition, which you can still edit. With no dictionary installed, definitions stay user-entered. Pack sizes are roughly 5 to 60 MB.
+- **Anki sync without losing history**: every Send to Anki first checks which cards still exist in Anki. A card you deleted in Anki is marked "Deleted in Anki" and is not re-added automatically; click **Re-send** on that row if you want it back. Deleting a card in Anki never deletes the encounter in Context Deck.
 - **Export file** downloads `context-deck-anki.txt` (text fields plus the `contextdeck://` link) for File > Import in Anki if you don't use AnkiConnect. Frames and audio are not included in the file.
 - The Chrome extension saves highlighted text from a webpage to `~/Downloads/context-deck/`. **Import browser captures** pulls those files into the database. Importing twice never creates duplicates (override the folder with `CONTEXT_DECK_CAPTURES`).
 - Optional: create SRT with a whisper.cpp you installed yourself (core library adapter).
 
-Encounters are append-only: deleting or re-exporting a card never deletes the history of where you met a word. There are regression tests for this and for persistence, import de-duplication and cross-site request blocking.
+Encounters are append-only: deleting or re-exporting a card never deletes the history of where you met a word. There are regression tests for this and for persistence, import de-duplication, dictionary lookup, Anki sync and cross-site request blocking.
 
 ## Why this is different
 
@@ -113,12 +115,15 @@ Context Deck's code is original. It does not copy those repositories or bundle A
 
 ## Safety and scope
 
-Use media you own or are allowed to access. Context Deck does not bypass DRM, scrape streaming catalogs, or fetch protected media. Definitions are user-entered in v0.1; provider adapters can be added later without making a network service mandatory.
+Use media you own or are allowed to access. Context Deck does not bypass DRM, scrape streaming catalogs, or fetch protected media. Dictionaries are optional and stay local after the one-time download; nothing is looked up online.
 
 ## Roadmap
 
-- Optional dictionary adapters
-- Deck sync reconciliation without ever deleting encounters
+Everything planned for this version has shipped. Ideas and bug reports are welcome as GitHub issues.
+
+## Dictionary credits
+
+Downloadable packs contain definitions from [Wiktionary](https://www.wiktionary.org/) (CC BY-SA 4.0), extracted by [kaikki.org](https://kaikki.org/) and packaged by [wiktionary-to-yomitan](https://github.com/yomidevs/wiktionary-to-yomitan). The packs are downloaded by you and are not bundled with Context Deck.
 
 ## License
 

@@ -47,18 +47,31 @@ test("media endpoint refuses files that were never opened", async () => {
   await stop(app.server);
 });
 
-test("Send to Anki pushes new cards once with media through AnkiConnect", async () => {
-  const notes = [];
-  const anki = createServer((req, res) => { let b = ""; req.on("data", (c) => b += c); req.on("end", () => { const m = JSON.parse(b); if (m.action === "addNote") notes.push(m.params.note); res.end(JSON.stringify({result: m.action === "addNote" ? 1000 + notes.length : null, error: null})); }); });
+test("Send to Anki pushes new cards once, notices deletions in Anki, and re-sends only on request", async () => {
+  const notes = new Map(); let nextId = 1000;
+  const anki = createServer((req, res) => { let b = ""; req.on("data", (c) => b += c); req.on("end", () => {
+    const m = JSON.parse(b); let result = null;
+    if (m.action === "addNote") { result = ++nextId; notes.set(result, m.params.note); }
+    if (m.action === "notesInfo") result = m.params.notes.map((id) => notes.has(id) ? {noteId: id} : {});
+    res.end(JSON.stringify({result, error: null})); }); });
   await new Promise((ok) => anki.listen(0, "127.0.0.1", ok));
   const dir = mkdtempSync(join(tmpdir(), "cd-anki-"));
   const app = await start({dbPath: join(dir, "deck.db"), captureDir: dir, ankiConnect: `http://127.0.0.1:${anki.address().port}`});
-  await post(`${app.base}/api/encounters`, {source: {kind: "video", title: "ep1", locator: "local:ep1"}, cue: {index: 0, startMs: 1000, endMs: 2000, text: "Hola <b>amigo</b>"}, term: "amigo", definition: "friend"});
+  const saved = await (await post(`${app.base}/api/encounters`, {source: {kind: "video", title: "ep1", locator: "local:ep1"}, cue: {index: 0, startMs: 1000, endMs: 2000, text: "Hola <b>amigo</b>"}, term: "amigo", definition: "friend"})).json();
   const first = await (await post(`${app.base}/api/send-to-anki`, {})).json();
   assert.equal(first.sent, 1);
-  assert.match(notes[0].fields.Front, /&lt;b&gt;amigo/); assert.match(notes[0].fields.Back, /contextdeck:\/\/source\//);
-  const again = await (await post(`${app.base}/api/send-to-anki`, {})).json();
-  assert.equal(again.sent, 0); assert.equal(notes.length, 1);
+  const [noteId, note] = [...notes.entries()][0];
+  assert.match(note.fields.Front, /&lt;b&gt;amigo/); assert.match(note.fields.Back, /contextdeck:\/\/source\//);
+  assert.equal((await (await post(`${app.base}/api/send-to-anki`, {})).json()).sent, 0);
+  notes.delete(noteId); // user deletes the card inside Anki
+  const sync = await (await post(`${app.base}/api/sync-anki`, {})).json();
+  assert.deepEqual(sync, {checked: 1, deletedInAnki: 1, inAnki: 0});
+  let list = await (await fetch(`${app.base}/api/encounters`)).json();
+  assert.equal(list.length, 1, "encounter history survives"); assert.equal(list[0].cardStatus, "deleted");
+  assert.equal((await (await post(`${app.base}/api/send-to-anki`, {})).json()).sent, 0, "deleted cards are not re-sent automatically");
+  assert.equal((await post(`${app.base}/api/encounters/${saved.id}/resend`, {})).status, 200);
+  list = await (await fetch(`${app.base}/api/encounters`)).json();
+  assert.equal(list[0].cardStatus, "in-anki"); assert.equal(notes.size, 1);
   await stop(app.server); await new Promise((ok) => anki.close(ok));
 });
 

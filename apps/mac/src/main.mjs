@@ -30,9 +30,11 @@ else app.setAsDefaultProtocolClient(SCHEME);
 app.whenReady().then(async () => {
   const {server} = createApp({
     uiDir: join(here, "..", "ui"),
-    pickFile: async () => {
-      const result = await dialog.showOpenDialog(win, {title: "Choose a video or audio file", properties: ["openFile"],
-        filters: [{name: "Video and audio", extensions: ["mp4", "m4v", "mov", "webm", "mkv", "mp3", "m4a", "aac", "wav", "ogg", "opus", "flac"]}]});
+    pickFile: async (kind) => {
+      const result = await dialog.showOpenDialog(win, kind === "dictionary"
+        ? {title: "Choose a Yomitan dictionary (.zip)", properties: ["openFile"], filters: [{name: "Dictionary", extensions: ["zip"]}]}
+        : {title: "Choose a video or audio file", properties: ["openFile"],
+          filters: [{name: "Video and audio", extensions: ["mp4", "m4v", "mov", "webm", "mkv", "mp3", "m4a", "aac", "wav", "ogg", "opus", "flac"]}]});
       return result.canceled ? null : result.filePaths[0] ?? null;
     }
   });

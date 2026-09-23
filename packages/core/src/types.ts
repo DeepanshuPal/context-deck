@@ -81,4 +81,6 @@ export interface EncounterView {
   screenshotPath?: string;
   audioClipPath?: string;
   createdAt: string;
+  /** new = never sent; exported = in a downloaded file; in-anki = sent via AnkiConnect; deleted = removed in Anki (history kept). */
+  cardStatus: "new" | "exported" | "in-anki" | "deleted";
 }
