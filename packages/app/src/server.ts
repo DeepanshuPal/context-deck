@@ -29,6 +29,8 @@ export const defaultCaptureDir = () => process.env.CONTEXT_DECK_CAPTURES ?? join
 export interface AppOptions {dbPath?: string; captureDir?: string; uiDir?: string; port?: number; mediaDir?: string; ankiConnect?: string;
   /** Host-provided native picker (the Mac app passes Electron's dialog). */
   pickFile?: (kind: "media" | "dictionary") => Promise<string | null>;
+  /** Host hook: put the browser extension in a folder the user can load in Chrome; returns that folder. */
+  setupExtension?: () => Promise<string>;
   fetcher?: typeof fetch}
 export interface ImportResult {imported: number; skipped: number; errors: {file: string; error: string}[]}
 
@@ -68,6 +70,7 @@ export function createApp(options: AppOptions = {}): {server: Server; store: Enc
   mkdirSync(mediaDir, {recursive: true});
   const ankiConnect = options.ankiConnect ?? process.env.CONTEXT_DECK_ANKICONNECT ?? "http://127.0.0.1:8765";
   const opened = new Set<string>();
+  let extensionSeenAt = 0;
   let dictJob: DictionaryJob = {state: "idle", label: "", bytes: 0, total: 0, entries: 0, files: 0};
   const ankiDown = (message: string) => /fetch failed|ECONNREFUSED/i.test(message);
   const ANKI_CLOSED = "Anki isn't reachable. Open Anki with the AnkiConnect add-on installed, then try again.";
@@ -146,6 +149,12 @@ export function createApp(options: AppOptions = {}): {server: Server; store: Enc
         try { const noteId = await pushToAnkiConnect(store.card(id), "Context Deck", ankiConnect); store.markExported(id, String(noteId)); return json(res, 200, {noteId}); }
         catch (error) { const m = (error as Error).message; return json(res, ankiDown(m) ? 502 : 400, {error: ankiDown(m) ? ANKI_CLOSED : m}); }
       }
+      if (url.pathname === "/api/extension" && req.method === "GET") return json(res, 200, {connected: Date.now() - extensionSeenAt < 5 * 60_000, lastSeen: extensionSeenAt || null, bridge: (server.address() as {port?: number} | null)?.port === BRIDGE_PORT || (server.address() as {port?: number} | null)?.port === 4173});
+      if (url.pathname === "/api/extension/setup" && req.method === "POST") {
+        const folder = options.setupExtension ? await options.setupExtension() : resolve(here, "..", "..", "..", "apps", "extension");
+        return json(res, 200, {folder});
+      }
+      if (origin === EXTENSION_ORIGIN) extensionSeenAt = Date.now();
       if (url.pathname === "/api/ext/hello" && req.method === "GET") return json(res, 200, {app: "context-deck", dictionaries: store.listDictionaries().length, ffmpeg: await hasFfmpeg()});
       if (url.pathname === "/api/ext/encounter" && req.method === "POST") {
         const body = JSON.parse(await readBody(req, 12_000_000));

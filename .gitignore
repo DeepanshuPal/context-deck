@@ -6,3 +6,5 @@ output/
 *.db-wal
 .DS_Store
 apps/mac/release/
+apps/mac/ui/
+apps/mac/extension/

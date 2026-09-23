@@ -1,5 +1,6 @@
 import {app, BrowserWindow, dialog, shell} from "electron";
 import {dirname, join} from "node:path";
+import {cpSync, rmSync} from "node:fs";
 import {fileURLToPath} from "node:url";
 import {createApp, BRIDGE_PORT} from "../../../packages/app/dist/server.js";
 
@@ -30,6 +31,14 @@ else app.setAsDefaultProtocolClient(SCHEME);
 app.whenReady().then(async () => {
   const {server} = createApp({
     uiDir: join(here, "..", "ui"),
+    // Copy the bundled Chrome extension to a normal folder (Chrome can't load it from inside the .app) and show it in Finder.
+    setupExtension: async () => {
+      const from = app.isPackaged ? join(process.resourcesPath, "extension") : join(here, "..", "extension");
+      const to = join(app.getPath("userData"), "Browser Extension");
+      rmSync(to, {recursive: true, force: true}); cpSync(from, to, {recursive: true});
+      shell.showItemInFolder(to);
+      return to;
+    },
     pickFile: async (kind) => {
       const result = await dialog.showOpenDialog(win, kind === "dictionary"
         ? {title: "Choose a Yomitan dictionary (.zip)", properties: ["openFile"], filters: [{name: "Dictionary", extensions: ["zip"]}]}
