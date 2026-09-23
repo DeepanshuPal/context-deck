@@ -6,10 +6,8 @@ Learn a language from scenes and pages you actually care about. Context Deck kee
 
 ## What works in v0.1
 
-- Open a local video/audio file in the desktop interface.
-- Load SRT or VTT subtitles and follow the active cue.
-- Save a word or phrase with definition, sentence and timestamp.
-- Store encounters in a local SQLite graph, separate from learning state and flashcard lifecycle.
+- Open a local video/audio file in the desktop proof UI, load SRT or VTT subtitles, follow the active cue, and save a word with definition, sentence and timestamp. The proof UI keeps saves in the page session only; it does not persist or export yet.
+- Core library: store encounters in a local SQLite graph, separate from learning state and flashcard lifecycle (run `npm run demo` to see it end to end).
 - Export deterministic Anki-compatible TSV with a `contextdeck://` deep link to the exact source timestamp.
 - Optionally push a card through AnkiConnect on localhost.
 - Optionally call a user-installed whisper.cpp binary/model to create SRT locally.
@@ -41,13 +39,11 @@ npm run demo
 npm run build
 ```
 
-Open the desktop proof UI:
+Open the desktop proof UI (a static page, no server needed):
 
 ```bash
-npm run dev -w @context-deck/desktop
+open apps/desktop/index.html      # macOS; or open dist/desktop/index.html after npm run build
 ```
-
-The built static interface lands in `apps/desktop/dist`.
 
 Load the browser extension in Chromium:
 
@@ -75,7 +71,7 @@ Desktop protocol registration is the next packaging milestone.
 ## Repository shape
 
 ```text
-apps/desktop      React/Vite desktop proof UI
+apps/desktop      static HTML/JS desktop proof UI
 apps/extension    Manifest V3 selection capture
 packages/core     encounter graph, subtitles, export, local adapters
 docs              architecture and invariants
@@ -99,10 +95,11 @@ Use media you own or are allowed to access. Context Deck does not bypass DRM, sc
 
 ## Roadmap
 
+- Wire the proof UI to the SQLite graph with persistent saves and one-click Anki TSV export
 - Electron packaging and `contextdeck://` protocol registration
 - Click-to-select tokens directly in subtitle text
 - Frame and short-audio extraction through local ffmpeg
-- Browser-capture inbox import
+- Import browser-extension captures into the graph
 - Optional dictionary adapters
 - Deck sync reconciliation without ever deleting encounters
 
