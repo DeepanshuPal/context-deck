@@ -1,5 +1,6 @@
 export type LearningState = "new" | "learning" | "known";
-export type SourceKind = "video" | "audio" | "web";
+/** stream = an online video (YouTube/Netflix) watched in the browser; locator is its canonical URL. */
+export type SourceKind = "video" | "audio" | "web" | "stream";
 
 export interface Source {
   id: string;
@@ -75,6 +76,9 @@ export interface EncounterView {
   sourceTitle: string;
   sourceKind: SourceKind;
   sourceId: string;
+  sourceLocator: string;
+  /** Where "open original" goes for online videos: the video URL at this moment. */
+  openUrl?: string;
   startMs: number;
   endMs: number;
   pageUrl?: string;

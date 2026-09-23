@@ -58,5 +58,5 @@ export function parseTermBank(rows: unknown[]): {terms: ParsedTerm[]; forms: Par
 
 export const dictKey = (value: string) => value.trim().normalize("NFC").toLocaleLowerCase();
 
-export interface LookupSense {pos: string; glosses: string[]; dictionary: string}
+export interface LookupSense {pos: string; glosses: string[]; dictionary: string; /** Set when the sense belongs to the base form this word inflects. */ lemma?: string}
 export interface LookupResult {query: string; lemma: string; via?: string; senses: LookupSense[]; suggestion: string}

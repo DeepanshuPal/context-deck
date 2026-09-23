@@ -1,7 +1,7 @@
 import {app, BrowserWindow, dialog, shell} from "electron";
 import {dirname, join} from "node:path";
 import {fileURLToPath} from "node:url";
-import {createApp} from "../../../packages/app/dist/server.js";
+import {createApp, BRIDGE_PORT} from "../../../packages/app/dist/server.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SCHEME = "contextdeck";
@@ -38,7 +38,9 @@ app.whenReady().then(async () => {
       return result.canceled ? null : result.filePaths[0] ?? null;
     }
   });
-  await new Promise((ok) => server.listen(0, "127.0.0.1", ok));
+  // Fixed port so the browser extension can find the app; fall back to any free port if it's taken.
+  const listen = (port) => new Promise((ok, fail) => { server.once("error", fail); server.listen(port, "127.0.0.1", () => { server.off("error", fail); ok(); }); });
+  await listen(Number(process.env.CONTEXT_DECK_PORT ?? BRIDGE_PORT)).catch(() => listen(0));
   base = `http://127.0.0.1:${server.address().port}/`;
   win = new BrowserWindow({width: 1280, height: 900, minWidth: 900, minHeight: 640, title: "Context Deck", backgroundColor: "#f7f7f4",
     webPreferences: {contextIsolation: true, sandbox: true, nodeIntegration: false}});

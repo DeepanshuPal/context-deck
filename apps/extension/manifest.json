@@ -1,1 +1,12 @@
-{"manifest_version":3,"name":"Context Deck Capture","version":"0.1.0","description":"Capture a selected sentence from a permitted webpage into Context Deck.","permissions":["activeTab","contextMenus","storage","downloads"],"background":{"service_worker":"background.js","type":"module"},"action":{"default_title":"Capture selection"}}
+{
+  "manifest_version": 3,
+  "name": "Context Deck",
+  "version": "0.7.0",
+  "description": "Click any word in YouTube or Netflix subtitles for an instant offline definition, and save it to Context Deck with its sentence and moment.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwTqsHSqFi8N4WC+W7R+mRqw+TdoYJdYGsdOKV88uNyk0TJFBIEjFwG11fnZhujJMC5w3j6cmkGWjItae6EQQ5Vh0m92sYALLdgL9C0XMAe0dsAWvuuzr1N1K+L8fA5MxRIpCpXJL6p17UqfARzyBTz3cF5YCuWu5itxB/acPoPhcmfU1WWuFcfLcjO6SWmpfAMy+fehpqRtEZjYlmSvZFQsyFjmE/ULpoqXG0JTxsMxDAb7xW2H4lsVL9M7eS1TiRByOxxp50KUd0WLjep7wxqUMHhse/BrxIcgYpVvwrXUUEDk9BglcaUN6nagUAAhPBsYlm1EyDGEeEExzIH2kNQIDAQAB",
+  "permissions": ["contextMenus", "storage", "unlimitedStorage", "downloads"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "background": {"service_worker": "background.js", "type": "module"},
+  "content_scripts": [{"matches": ["https://www.youtube.com/*", "https://www.netflix.com/*"], "js": ["content.js"], "run_at": "document_idle"}],
+  "action": {"default_title": "Context Deck", "default_popup": "popup.html"}
+}

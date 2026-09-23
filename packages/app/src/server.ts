@@ -3,15 +3,22 @@ import {existsSync, mkdirSync, readdirSync, readFileSync, statSync} from "node:f
 import {homedir, platform} from "node:os";
 import {dirname, extname, join, resolve, sep} from "node:path";
 import {fileURLToPath} from "node:url";
-import {EncounterStore, ankiNotesThatExist, cardsToAnkiFile, parseBrowserCapture, pushToAnkiConnect} from "@context-deck/core";
+import {EncounterStore, parseStreamUrl, ankiNotesThatExist, cardsToAnkiFile, parseBrowserCapture, pushToAnkiConnect} from "@context-deck/core";
 import {tmpdir} from "node:os";
 import {isAbsolute, basename} from "node:path";
 import {CATALOG, catalogUrl, runDictionaryJob, type DictionaryJob} from "./dictionaries.js";
-import {createWriteStream} from "node:fs";
+import {createWriteStream, writeFileSync} from "node:fs";
 import {pipeline} from "node:stream/promises";
-import {canPickNatively, extractClip, findSiblingSubtitles, hasFfmpeg, isMediaFile, mediaKind, pickFileNatively, streamFile} from "./media.js";
+import {canPickNatively, transcodeToMp3, extractClip, findSiblingSubtitles, hasFfmpeg, isMediaFile, mediaKind, pickFileNatively, streamFile} from "./media.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
+/** The Context Deck browser extension. Its ID is fixed by the public key in apps/extension/manifest.json. */
+export const EXTENSION_ORIGIN = "chrome-extension://mbcfobjmnbiojojpdgiagioofoajmnhp";
+/** Port the Mac app listens on so the extension can find it (npm start uses 4173). */
+export const BRIDGE_PORT = 47317;
+const allowedOrigin = (origin: string) => /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin) || origin === EXTENSION_ORIGIN;
+const MEDIA_DATA = /^data:(image\/(?:jpeg|webp|png)|audio\/(?:webm|ogg|mp4))(?:;codecs=[\w.,"-]+)?;base64,([A-Za-z0-9+/=]+)$/;
+const EXT: Record<string, string> = {"image/jpeg": "jpg", "image/webp": "webp", "image/png": "png", "audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "m4a"};
 const MIME: Record<string, string> = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8"};
 
 export const defaultDbPath = () => process.env.CONTEXT_DECK_DB ?? (platform() === "darwin"
@@ -93,7 +100,8 @@ export function createApp(options: AppOptions = {}): {server: Server; store: Enc
       // Localhost only, and reject cross-site requests from other webpages.
       if (host !== "127.0.0.1" && host !== "localhost") return json(res, 403, {error: "Forbidden host"});
       const origin = req.headers.origin;
-      if (req.method !== "GET" && origin && !/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin)) return json(res, 403, {error: "Forbidden origin"});
+      if (origin && !allowedOrigin(origin) && (req.method !== "GET" || url.pathname.startsWith("/api/"))) return json(res, 403, {error: "Forbidden origin"});
+      if (origin === EXTENSION_ORIGIN && !url.pathname.startsWith("/api/ext/") && url.pathname !== "/api/lookup") return json(res, 403, {error: "Forbidden origin"});
 
       if (url.pathname === "/api/pick-media" && req.method === "POST") {
         const path = options.pickFile ? await options.pickFile("media") : await pickFileNatively("Choose a video or audio file for Context Deck");
@@ -137,6 +145,37 @@ export function createApp(options: AppOptions = {}): {server: Server; store: Enc
         const id = decodeURIComponent(url.pathname.split("/")[3]);
         try { const noteId = await pushToAnkiConnect(store.card(id), "Context Deck", ankiConnect); store.markExported(id, String(noteId)); return json(res, 200, {noteId}); }
         catch (error) { const m = (error as Error).message; return json(res, ankiDown(m) ? 502 : 400, {error: ankiDown(m) ? ANKI_CLOSED : m}); }
+      }
+      if (url.pathname === "/api/ext/hello" && req.method === "GET") return json(res, 200, {app: "context-deck", dictionaries: store.listDictionaries().length, ffmpeg: await hasFfmpeg()});
+      if (url.pathname === "/api/ext/encounter" && req.method === "POST") {
+        const body = JSON.parse(await readBody(req, 12_000_000));
+        const ref = parseStreamUrl(String(body.url ?? ""));
+        if (!ref) return json(res, 400, {error: "Only YouTube and Netflix watch pages are supported"});
+        const term = String(body.term ?? "").trim().slice(0, 200);
+        const text = String(body.cue?.text ?? "").trim().slice(0, 2000);
+        if (!term || !text) return json(res, 400, {error: "term and cue.text are required"});
+        const startMs = Math.max(0, Math.round(Number(body.cue?.startMs) || 0));
+        const endMs = Math.max(startMs, Math.round(Number(body.cue?.endMs) || startMs));
+        const encounter = store.capture({
+          source: {kind: "stream", title: String(body.title ?? "").trim().slice(0, 300) || (ref.site === "youtube" ? "YouTube video" : "Netflix"), locator: ref.locator, language: String(body.language ?? "und").slice(0, 20)},
+          cue: {index: 0, startMs, endMs, text}, selectedText: term,
+          // Saved while the app was closed (no lookup happened): fill in the dictionary definition now.
+          definition: String(body.definition ?? "").trim().slice(0, 4000) || store.lookup(term)?.suggestion || undefined
+        });
+        const saved: {screenshotPath?: string; audioClipPath?: string} = {}; const errors: string[] = [];
+        for (const [field, key] of [["frame", "screenshotPath"], ["audio", "audioClipPath"]] as const) {
+          if (!body[field]) continue;
+          const m = MEDIA_DATA.exec(String(body[field]));
+          if (!m || (field === "frame") !== m[1].startsWith("image/")) { errors.push(`${field}: unsupported data`); continue; }
+          const file = join(mediaDir, `${encounter.id}.${EXT[m[1]]}`);
+          writeFileSync(file, Buffer.from(m[2], "base64"));
+          saved[key] = file;
+        }
+        if (saved.audioClipPath && !saved.audioClipPath.endsWith(".m4a") && await hasFfmpeg()) {
+          try { saved.audioClipPath = await transcodeToMp3(saved.audioClipPath); } catch (e) { errors.push(`audio: ${(e as Error).message.slice(0, 200)}`); }
+        }
+        store.attachMedia(encounter.id, saved);
+        return json(res, 201, {...store.getEncounter(encounter.id), errors});
       }
       if (url.pathname === "/api/lookup" && req.method === "GET") return json(res, 200, store.lookup(url.searchParams.get("term") ?? ""));
       if (url.pathname === "/api/dictionaries" && req.method === "GET") return json(res, 200, {installed: store.listDictionaries(), catalog: CATALOG, job: dictJob});

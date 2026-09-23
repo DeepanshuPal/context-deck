@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import {createHash, randomUUID} from "node:crypto";
 import type {AnkiCard, CaptureInput, Encounter, EncounterView, LearningState, Source, TermSummary} from "./types.js";
 import type {BrowserCapture} from "./browser-capture.js";
+import {streamLink} from "./stream.js";
 import {dictKey, type DictionaryIndex, type LookupResult, type LookupSense, type ParsedForm, type ParsedTerm} from "./dictionary.js";
 
 const now = () => new Date().toISOString();
@@ -114,10 +115,11 @@ export class EncounterStore {
   card(encounterId: string): AnkiCard {
     const row = this.db.prepare(`SELECT e.id encounterId,t.display term,COALESCE(t.definition,'') definition,
       e.sentence,s.title sourceTitle,e.start_ms startMs,e.screenshot_path screenshotPath,e.audio_clip_path audioClipPath,
-      e.source_id sourceId FROM encounters e JOIN terms t ON t.id=e.term_id JOIN sources s ON s.id=e.source_id WHERE e.id=?`).get(encounterId) as (AnkiCard & {sourceId:string}) | undefined;
+      e.source_id sourceId,s.kind sourceKind,s.locator sourceLocator FROM encounters e JOIN terms t ON t.id=e.term_id JOIN sources s ON s.id=e.source_id WHERE e.id=?`).get(encounterId) as (AnkiCard & {sourceId:string; sourceKind:string; sourceLocator:string}) | undefined;
     if (!row) throw new Error(`Unknown encounter: ${encounterId}`);
-    const deepLink = `contextdeck://source/${encodeURIComponent(row.sourceId)}?t=${row.startMs}&encounter=${encodeURIComponent(row.encounterId)}`;
-    const {sourceId: _, ...card} = {...row, deepLink};
+    const deepLink = (row.sourceKind === "stream" ? streamLink(row.sourceLocator, row.startMs) : undefined)
+      ?? `contextdeck://source/${encodeURIComponent(row.sourceId)}?t=${row.startMs}&encounter=${encodeURIComponent(row.encounterId)}`;
+    const {sourceId: _, sourceKind: _k, sourceLocator: _l, ...card} = {...row, deepLink};
     return card;
   }
 
@@ -148,11 +150,12 @@ export class EncounterStore {
 
   /** Newest-first encounter list joined with term and source, for the desktop UI. */
   recentEncounters(limit = 200): EncounterView[] {
-    return this.db.prepare(`SELECT e.id,t.display term,COALESCE(t.definition,'') definition,t.state,e.sentence,
-      s.title sourceTitle,s.kind sourceKind,s.id sourceId,e.start_ms startMs,e.end_ms endMs,e.page_url pageUrl,e.screenshot_path screenshotPath,e.audio_clip_path audioClipPath,e.created_at createdAt,
+    return (this.db.prepare(`SELECT e.id,t.display term,COALESCE(t.definition,'') definition,t.state,e.sentence,
+      s.title sourceTitle,s.kind sourceKind,s.id sourceId,s.locator sourceLocator,e.start_ms startMs,e.end_ms endMs,e.page_url pageUrl,e.screenshot_path screenshotPath,e.audio_clip_path audioClipPath,e.created_at createdAt,
       CASE WHEN c.encounter_id IS NULL THEN 'new' WHEN c.deleted_at IS NOT NULL THEN 'deleted' WHEN c.external_id IS NULL THEN 'exported' ELSE 'in-anki' END cardStatus
       FROM encounters e JOIN terms t ON t.id=e.term_id JOIN sources s ON s.id=e.source_id LEFT JOIN cards c ON c.encounter_id=e.id
-      ORDER BY e.created_at DESC, e.rowid DESC LIMIT ?`).all(limit) as EncounterView[];
+      ORDER BY e.created_at DESC, e.rowid DESC LIMIT ?`).all(limit) as EncounterView[])
+      .map((v) => v.sourceKind === "stream" ? {...v, openUrl: streamLink(v.sourceLocator, v.startMs)} : v);
   }
 
   /** Attach extracted frame/audio files to an encounter. Only fills paths; never removes history. */
@@ -223,14 +226,31 @@ export class EncounterStore {
     const entries = (k: string) => this.db.prepare(`SELECT e.pos,e.glosses,d.title FROM dict_entries e JOIN dictionaries d ON d.id=e.dict_id
       WHERE e.term_key=? ORDER BY e.score DESC, e.rowid LIMIT 12`).all(k) as {pos: string; glosses: string; title: string}[];
     const toSenses = (rows: {pos: string; glosses: string; title: string}[]): LookupSense[] => rows.map((r) => ({pos: r.pos, glosses: JSON.parse(r.glosses), dictionary: r.title}));
-    let senses = toSenses(entries(key)); let lemma = query.trim(); let via: string | undefined;
-    const form = this.db.prepare("SELECT lemma,note FROM dict_forms WHERE form_key=? LIMIT 1").get(key) as {lemma: string; note: string} | undefined;
-    if (form && (!senses.length || senses.every((s) => s.pos === "non-lemma"))) {
-      const lemmaSenses = toSenses(entries(dictKey(form.lemma)));
-      if (lemmaSenses.length) { senses = lemmaSenses; lemma = form.lemma; via = form.note; }
+    const exact = toSenses(entries(key)).filter((x) => x.pos !== "non-lemma");
+    // A word can be both its own entry and an inflected form (sé: "yes" / form of saber, ser). Show both;
+    // the form's lemma comes first unless the word's own entry is a major part of speech (como: "like" before comer).
+    // Rare readings (archaic, voseo, imperative) rank after everyday ones: sé = "I know" (saber) before "be!" (ser).
+    const rank = (note: string) => /archaic|obsolete|alt-of|dated|voseo|misspelling/i.test(note) ? 3 : /imperative/i.test(note) ? 2 : 0;
+    const best = new Map<string, {lemma: string; note: string; r: number; i: number}>();
+    (this.db.prepare("SELECT lemma,note FROM dict_forms WHERE form_key=? ORDER BY rowid LIMIT 40").all(key) as {lemma: string; note: string}[])
+      .forEach((f, i) => { const r = rank(f.note ?? ""); const cur = best.get(f.lemma); if (!cur || r < cur.r) best.set(f.lemma, {...f, r, i: cur ? Math.min(cur.i, i) : i}); });
+    const forms = [...best.values()].sort((a, b) => a.r - b.r || a.i - b.i).slice(0, 3);
+    const groups: {lemma: string; via?: string; senses: LookupSense[]}[] = [];
+    for (const form of forms) {
+      if (dictKey(form.lemma) === key) continue;
+      const lemmaSenses = toSenses(entries(dictKey(form.lemma))).filter((x) => x.pos !== "non-lemma").map((x) => ({...x, lemma: form.lemma}));
+      if (lemmaSenses.length) groups.push({lemma: form.lemma, via: form.note, senses: lemmaSenses});
     }
+    const MAJOR = /^(n|noun|v|verb|adj|adv|pron|prep|conj|det|num|article|particle|phrase)$/i;
+    // Proper nouns (Como, the city) go last: subtitle lines capitalise their first word, so capitals prove nothing.
+    exact.sort((a, b) => Number(a.pos === "name") - Number(b.pos === "name"));
+    const own = {lemma: query.trim(), via: undefined as string | undefined, senses: exact};
+    if (exact.length && (!groups.length || exact.some((x) => MAJOR.test(x.pos)))) groups.unshift(own); else if (exact.length) groups.push(own);
+    const primary = groups[0];
+    const senses = groups.flatMap((g) => g.senses);
+    const lemma = primary?.lemma ?? query.trim(); const via = primary?.via;
     if (!senses.length) return null;
-    const first = [...new Set(senses.flatMap((s) => s.glosses))].slice(0, 2).join("; ");
+    const first = [...new Set(primary.senses.flatMap((s) => s.glosses))].slice(0, 2).join("; ");
     return {query, lemma, via, senses, suggestion: lemma !== query.trim() ? `(${lemma}) ${first}` : first};
   }
 

@@ -1,0 +1,15 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+body{width:300px;margin:0;padding:14px;font:13px/1.45 system-ui,-apple-system,sans-serif;color:#1d1d1b;background:#fbfbf8}
+h1{font-size:15px;margin:0 0 8px}.ok{color:#3d6b45}.bad{color:#a33}p{margin:6px 0}label{display:flex;gap:8px;align-items:flex-start;margin:6px 0}
+.fine{color:#777;font-size:12px}
+</style></head><body>
+<h1>Context Deck</h1>
+<p id="app">Checking for the app…</p>
+<p id="dicts" class="fine"></p>
+<p id="queue" class="fine"></p>
+<label><input type="checkbox" id="enabled"> Clickable subtitles on YouTube and Netflix</label>
+<label><input type="checkbox" id="pauseOnHover"> Pause while I hover a word</label>
+<label><input type="checkbox" id="saveAudio"> Save the line's audio (replays the line once when you save; YouTube only)</label>
+<p class="fine">Turn on the video's subtitles, then hover or click any word. <b>S</b> saves, <b>Esc</b> closes, Shift-click makes a phrase.</p>
+<script src="popup.js"></script>
+</body></html>

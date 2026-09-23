@@ -5,3 +5,4 @@ export * from "./anki.js";
 export * from "./whisper.js";
 export * from "./browser-capture.js";
 export * from "./dictionary.js";
+export * from "./stream.js";

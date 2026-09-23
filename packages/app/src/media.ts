@@ -1,5 +1,5 @@
 import {execFile} from "node:child_process";
-import {existsSync, statSync, createReadStream, readdirSync} from "node:fs";
+import {existsSync, statSync, createReadStream, readdirSync, unlinkSync} from "node:fs";
 import {extname, join, parse} from "node:path";
 import {platform} from "node:os";
 import type {IncomingMessage, ServerResponse} from "node:http";
@@ -45,6 +45,15 @@ export async function extractClip(req: ClipRequest): Promise<ClipResult> {
 }
 
 /** Native file dialog. macOS uses AppleScript; Linux uses zenity when present. Returns null when cancelled or unsupported. */
+/** Turn a browser-recorded clip (webm/ogg) into mp3 so every Anki client can play it. Removes the original. */
+export async function transcodeToMp3(file: string): Promise<string> {
+  const mp3 = file.replace(/\.[^.]+$/, ".mp3");
+  await run(ffmpegBinary(), ["-y", "-loglevel", "error", "-i", file, "-vn", "-ac", "1", "-c:a", "libmp3lame", "-q:a", "4", mp3]);
+  if (!existsSync(mp3)) throw new Error("ffmpeg produced no mp3");
+  unlinkSync(file);
+  return mp3;
+}
+
 export async function pickFileNatively(prompt: string): Promise<string | null> {
   try {
     if (platform() === "darwin") {
