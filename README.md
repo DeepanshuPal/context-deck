@@ -7,7 +7,8 @@ Learn a language from scenes and pages you actually care about. Context Deck kee
 ## What works in v0.2
 
 - `npm start` runs Context Deck on your own machine at `http://127.0.0.1:4173` (localhost only, nothing leaves your computer).
-- Open a local video/audio file, load SRT or VTT subtitles, follow the active line, and save a word with your definition, the sentence and the timestamp.
+- Open a local video/audio file, load SRT or VTT subtitles, and follow the active line.
+- Click any word in the subtitle to pick it (the video pauses). Shift-click another word to extend it to a phrase. Works for unspaced scripts like Japanese and Chinese too, using the browser's word segmenter. Add a definition and save: the word, sentence and timestamp are stored together.
 - Saves go into a local SQLite database and survive restarts (macOS: `~/Library/Application Support/Context Deck/deck.db`; elsewhere `~/.context-deck/deck.db`; override with `CONTEXT_DECK_DB`).
 - **Export to Anki** downloads `context-deck-anki.txt` with every saved encounter and a `contextdeck://` link to the exact moment. Import it in Anki with File > Import.
 - The Chrome extension saves highlighted text from a webpage to `~/Downloads/context-deck/`. **Import browser captures** pulls those files into the database. Importing twice never creates duplicates (override the folder with `CONTEXT_DECK_CAPTURES`).
@@ -96,7 +97,6 @@ Use media you own or are allowed to access. Context Deck does not bypass DRM, sc
 ## Roadmap
 
 - Electron packaging and `contextdeck://` protocol registration
-- Click-to-select tokens directly in subtitle text
 - Frame and short-audio extraction through local ffmpeg
 - Optional dictionary adapters
 - Deck sync reconciliation without ever deleting encounters
