@@ -65,3 +65,16 @@ export interface AnkiCard {
   screenshotPath?: string;
   audioClipPath?: string;
 }
+
+export interface EncounterView {
+  id: string;
+  term: string;
+  definition: string;
+  state: LearningState;
+  sentence: string;
+  sourceTitle: string;
+  sourceKind: SourceKind;
+  startMs: number;
+  pageUrl?: string;
+  createdAt: string;
+}

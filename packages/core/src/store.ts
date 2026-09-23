@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import {createHash, randomUUID} from "node:crypto";
-import type {AnkiCard, CaptureInput, Encounter, LearningState, Source, TermSummary} from "./types.js";
+import type {AnkiCard, CaptureInput, Encounter, EncounterView, LearningState, Source, TermSummary} from "./types.js";
+import type {BrowserCapture} from "./browser-capture.js";
 
 const now = () => new Date().toISOString();
 const normalize = (value: string) => value.trim().toLocaleLowerCase().normalize("NFKC");
@@ -33,6 +34,9 @@ export class EncounterStore {
         encounter_id TEXT PRIMARY KEY REFERENCES encounters(id), external_id TEXT,
         exported_at TEXT NOT NULL, deleted_at TEXT
       );
+      CREATE TABLE IF NOT EXISTS imports (
+        import_key TEXT PRIMARY KEY, encounter_id TEXT NOT NULL REFERENCES encounters(id), imported_at TEXT NOT NULL
+      );
       CREATE INDEX IF NOT EXISTS idx_encounters_term ON encounters(term_id, created_at);
       CREATE INDEX IF NOT EXISTS idx_encounters_source_time ON encounters(source_id, start_ms);
     `);
@@ -49,7 +53,7 @@ export class EncounterStore {
       this.db.prepare(`INSERT INTO sources (id,kind,title,locator,language,duration_ms,created_at)
         VALUES (@id,@kind,@title,@locator,@language,@durationMs,@createdAt)
         ON CONFLICT(kind,locator) DO UPDATE SET title=excluded.title, language=excluded.language, duration_ms=COALESCE(excluded.duration_ms,sources.duration_ms)`)
-        .run({...input.source, id: sid, createdAt});
+        .run({...input.source, durationMs: input.source.durationMs ?? null, id: sid, createdAt});
       this.db.prepare(`INSERT INTO terms (id,normalized,display,definition,state,created_at,updated_at)
         VALUES (@id,@normalized,@display,@definition,'new',@createdAt,@createdAt)
         ON CONFLICT(normalized) DO UPDATE SET definition=COALESCE(excluded.definition,terms.definition), updated_at=excluded.updated_at`)
@@ -109,6 +113,35 @@ export class EncounterStore {
 
   markCardDeleted(encounterId: string): void {
     this.db.prepare("UPDATE cards SET deleted_at=? WHERE encounter_id=?").run(now(), encounterId);
+  }
+
+  /** Import one browser-extension capture. Idempotent: the same capture never creates a second encounter. */
+  importBrowserCapture(capture: BrowserCapture): {encounter: Encounter; created: boolean} {
+    const key = createHash("sha256").update(`${capture.source.locator}\0${capture.selectedText}\0${capture.capturedAt}`).digest("hex");
+    const existing = this.db.prepare("SELECT encounter_id id FROM imports WHERE import_key=?").get(key) as {id: string} | undefined;
+    if (existing) return {encounter: this.getEncounter(existing.id)!, created: false};
+    const encounter = this.capture({
+      source: {kind: "web", title: capture.source.title, locator: capture.source.locator, language: capture.source.language},
+      cue: {index: 0, startMs: 0, endMs: 0, text: capture.sentence},
+      selectedText: capture.selectedText,
+      pageUrl: capture.source.locator
+    });
+    this.db.prepare("INSERT INTO imports(import_key,encounter_id,imported_at) VALUES(?,?,?)").run(key, encounter.id, now());
+    return {encounter, created: true};
+  }
+
+  /** Newest-first encounter list joined with term and source, for the desktop UI. */
+  recentEncounters(limit = 200): EncounterView[] {
+    return this.db.prepare(`SELECT e.id,t.display term,COALESCE(t.definition,'') definition,t.state,e.sentence,
+      s.title sourceTitle,s.kind sourceKind,e.start_ms startMs,e.page_url pageUrl,e.created_at createdAt
+      FROM encounters e JOIN terms t ON t.id=e.term_id JOIN sources s ON s.id=e.source_id
+      ORDER BY e.created_at DESC, e.rowid DESC LIMIT ?`).all(limit) as EncounterView[];
+  }
+
+  /** Cards for every encounter, oldest first, for a full Anki export. */
+  allCards(): AnkiCard[] {
+    const ids = this.db.prepare("SELECT id FROM encounters ORDER BY created_at, rowid").all() as {id: string}[];
+    return ids.map(({id}) => this.card(id));
   }
 
   close(): void { this.db.close(); }

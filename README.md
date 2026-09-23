@@ -4,16 +4,16 @@ Learn a language from scenes and pages you actually care about. Context Deck kee
 
 **Local-first. No account. No server. No hosted media catalog. No DRM interception.**
 
-## What works in v0.1
+## What works in v0.2
 
-- Open a local video/audio file in the desktop proof UI, load SRT or VTT subtitles, follow the active cue, and save a word with definition, sentence and timestamp. The proof UI keeps saves in the page session only; it does not persist or export yet.
-- Core library: store encounters in a local SQLite graph, separate from learning state and flashcard lifecycle (run `npm run demo` to see it end to end).
-- Export deterministic Anki-compatible TSV with a `contextdeck://` deep link to the exact source timestamp.
-- Optionally push a card through AnkiConnect on localhost.
-- Optionally call a user-installed whisper.cpp binary/model to create SRT locally.
-- Capture an explicit text selection from a normal webpage with the Manifest V3 browser extension.
+- `npm start` runs Context Deck on your own machine at `http://127.0.0.1:4173` (localhost only, nothing leaves your computer).
+- Open a local video/audio file, load SRT or VTT subtitles, follow the active line, and save a word with your definition, the sentence and the timestamp.
+- Saves go into a local SQLite database and survive restarts (macOS: `~/Library/Application Support/Context Deck/deck.db`; elsewhere `~/.context-deck/deck.db`; override with `CONTEXT_DECK_DB`).
+- **Export to Anki** downloads `context-deck-anki.txt` with every saved encounter and a `contextdeck://` link to the exact moment. Import it in Anki with File > Import.
+- The Chrome extension saves highlighted text from a webpage to `~/Downloads/context-deck/`. **Import browser captures** pulls those files into the database. Importing twice never creates duplicates (override the folder with `CONTEXT_DECK_CAPTURES`).
+- Optional: push a card through AnkiConnect on localhost, or create SRT with a whisper.cpp you installed yourself (core library adapters).
 
-The core invariant has a regression test: deleting an exported card never deletes encounter history.
+Encounters are append-only: deleting or re-exporting a card never deletes the history of where you met a word. There are regression tests for this and for persistence, import de-duplication and cross-site request blocking.
 
 ## Why this is different
 
@@ -30,29 +30,28 @@ The flashcard is a disposable view of that history, not the history itself.
 
 ## Run it
 
-Requires Node 20+.
+Requires Node 20+ (`node -v`; on macOS `brew install node`).
 
 ```bash
+git clone https://github.com/DeepanshuPal/context-deck.git
+cd context-deck
 npm install
-npm run check
-npm run demo
-npm run build
+npm start
 ```
 
-Open the desktop proof UI (a static page, no server needed):
+Then open http://127.0.0.1:4173. Stop it with Ctrl+C; your saves stay.
 
-```bash
-open apps/desktop/index.html      # macOS; or open dist/desktop/index.html after npm run build
-```
+Other commands: `npm run check` (build + tests), `npm run demo` (engine demo in memory).
 
-Load the browser extension in Chromium:
+Load the browser extension in Chrome:
 
 1. Open `chrome://extensions`.
 2. Turn on Developer mode.
-3. Load unpacked: `apps/extension`.
-4. Select text on a permitted HTTP(S) page and use **Save selection to Context Deck**.
+3. Load unpacked: pick the `apps/extension` folder.
+4. Highlight text on a normal webpage, right-click, **Save selection to Context Deck**.
+5. In the app, click **Import browser captures**.
 
-The extension saves a small JSON capture to the browser's local storage and Downloads. It does not download page media or inspect DRM streams.
+The extension only saves the text you highlight plus the page title and URL. It does not download page media or inspect DRM streams.
 
 ## Local transcription
 
@@ -71,7 +70,8 @@ Desktop protocol registration is the next packaging milestone.
 ## Repository shape
 
 ```text
-apps/desktop      static HTML/JS desktop proof UI
+apps/desktop      static HTML/JS interface
+packages/app      localhost server: serves the UI, SQLite API, Anki export, capture import
 apps/extension    Manifest V3 selection capture
 packages/core     encounter graph, subtitles, export, local adapters
 docs              architecture and invariants
@@ -95,11 +95,9 @@ Use media you own or are allowed to access. Context Deck does not bypass DRM, sc
 
 ## Roadmap
 
-- Wire the proof UI to the SQLite graph with persistent saves and one-click Anki TSV export
 - Electron packaging and `contextdeck://` protocol registration
 - Click-to-select tokens directly in subtitle text
 - Frame and short-audio extraction through local ffmpeg
-- Import browser-extension captures into the graph
 - Optional dictionary adapters
 - Deck sync reconciliation without ever deleting encounters
 
